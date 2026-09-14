@@ -21,7 +21,7 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(self.scan()['source'],'window OCR')
         self.assertEqual(self.scan()['source'],'cached window OCR')
         self.assertEqual(self.scan(b'changed')['source'],'window OCR')
-        self.assertEqual(omalink.run.call_count,2)
+        self.assertEqual(omalink.run.call_count,4)
         self.assertEqual(omalink.run.call_args.kwargs['env']['OMP_THREAD_LIMIT'],'1')
     def test_expiry_and_disabled_cache(self):
         self.scan()
@@ -29,7 +29,7 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(self.scan()['source'],'window OCR')
         omalink.config.return_value['cache_ttl_s']=0
         self.scan(); self.scan()
-        self.assertEqual(omalink.run.call_count,4)
+        self.assertEqual(omalink.run.call_count,8)
     def test_corrupt_cache_falls_back(self):
         self.scan(); entry=next((self.root/'cache').glob('*.json')); entry.write_text('{"bad":true}')
         self.assertEqual(self.scan()['source'],'window OCR')

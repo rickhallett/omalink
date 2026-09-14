@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='omalink-panel-',dir=os.environ['XDG_RUN
         assert warm['note'].startswith('cached window OCR'),warm
         # Remove only this synthetic result's cache entry to force in-flight work.
         import hashlib
-        cache=omalink.RUNTIME/'cache'/(hashlib.sha256(data+b'ocr-v4:1:eng:11').hexdigest()+'.json')
+        cache=omalink.RUNTIME/'cache'/(hashlib.sha256(data+b'ocr-v5-2x:1:eng:11').hexdigest()+'.json')
         cache.unlink(missing_ok=True)
         a=image(data); summon({'image':a}); time.sleep(.05)
         summon({'urls':['https://example.org/latest-1','https://example.org/latest-2'],'note':'latest direct result'})

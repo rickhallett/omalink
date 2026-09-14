@@ -206,7 +206,7 @@ def ocr(path,scope='window',capture_ms=0):
         entries=sorted(cache.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True)
         for i,p in enumerate(entries):
             if i>=16 or time.time()-p.stat().st_mtime>ttl: p.unlink(missing_ok=True)
-        digest=hashlib.sha256(path.read_bytes()+f'ocr-v4:{settings["threads"]}:eng:11'.encode()).hexdigest()
+        digest=hashlib.sha256(path.read_bytes()+f'ocr-v5-2x:{settings["threads"]}:eng:11'.encode()).hexdigest()
         entry=cache/(digest+'.json'); data=None
         if entry.exists() and ttl:
             try:
@@ -215,6 +215,9 @@ def ocr(path,scope='window',capture_ms=0):
             except (OSError,ValueError): pass
         cached=data is not None
         if data is None:
+            # Small terminal glyphs lose m/n strokes at native resolution.
+            # Enlarge pixels before recognition; never substitute URL characters.
+            run(['magick','-limit','thread','1',str(path),'-resize','200%',str(path)])
             result=run(['tesseract',str(path),'stdout','--oem','1','--psm','11','-l','eng','--dpi','150'],env={**os.environ,'OMP_THREAD_LIMIT':str(settings['threads'])})
             data=collect(result.stdout,ocr=True)
             if ttl:

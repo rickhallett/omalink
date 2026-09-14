@@ -15,7 +15,7 @@ On this machine, the direct paths reached the summon stage in **71 ms for Foot**
 - Foot uses `pipe-visible`, without changing the clipboard or reading scrollback. Terminals opened before the bridge was installed retain OCR in the same j/k panel; open a new terminal to enable exact text extraction. Existing sessions are never restarted automatically. Omalink does not switch to Foot’s letter-hint interface.
 - Chrome uses AT-SPI, restricted to the active browser frame's visible web document. It reads link destinations, including labelled links and links exposed from shadow DOM. Editable fields are skipped. Offscreen and `display:none` fixture links were excluded. Accessibility visibility is semantic: occlusion, transparent elements, and partly clipped text can differ from pixel visibility.
 - A missing, failed or slow text provider falls back to OCR. Chrome accessibility runs in a separate process with a 650 ms limit; traversal has a smaller time/node budget. A responsive provider without links also falls back, allowing links in images or browser UI to be found.
-- OCR captures the window at its monitor's scale. Whole-monitor mode deliberately bypasses the text bridges. One Tesseract thread was fastest in the measured matrix.
+- OCR captures the window at its monitor's scale, then enlarges the image 2× before recognition to reduce small-text m/n confusion. Whole-monitor mode deliberately bypasses the text bridges. One Tesseract thread was fastest in the measured matrix.
 - The footer shows the source and processing time. Launching again keeps the latest request; old OCR cannot overwrite newer direct results. Closing during OCR does not reopen the picker.
 
 Chrome's most recently focused normal window is focused before opening a new tab. Chrome's single-instance handling reuses the running browser or starts one if absent. Existing profiles and sessions are preserved.
@@ -24,7 +24,7 @@ Chrome's most recently focused normal window is focused before opening a new tab
 
 Early release for Omarchy Quattro. OCR can corrupt small text and query strings; check destinations before opening. Direct text is preferred for supported sessions.
 
-Dependencies: Python 3, `grim`, `tesseract`, `tesseract-data-eng`, Google Chrome, Hyprland, and Omarchy's Quickshell. Optional Chrome text extraction also requires `python-gobject` and `at-spi2-core`. Benchmarks additionally use ImageMagick. No Python package installation is required.
+Dependencies: Python 3, ImageMagick (`magick`), `grim`, `tesseract`, `tesseract-data-eng`, Google Chrome, Hyprland, and Omarchy's Quickshell. Optional Chrome text extraction also requires `python-gobject` and `at-spi2-core`. No Python package installation is required.
 
 ```sh
 omarchy plugin add https://github.com/rickhallett/omalink --enable

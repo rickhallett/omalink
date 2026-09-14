@@ -54,3 +54,24 @@ The test used an isolated Chrome profile and a localhost fixture. Offscreen, `di
 - Opening a URL uses the previously verified Chrome handoff, retained by this change. Existing user Chrome was not shut down to retest the cold browser launch case.
 
 Defaults are window scope, one OCR thread, 30-second exact-image cache, and direct text enabled. New Foot processes and the next ordinary Chrome process load their bridges; existing processes immediately benefit from the OCR improvements.
+
+
+## Small-text accuracy follow-up — 14 September 2026
+
+A six-URL fixture rendered in a real Foot window with the installed 9-point
+JetBrainsMono font reproduced m/n confusion. Raw PSM 11 OCR recovered 2/6
+exact URLs; 2× image scaling recovered 4/6. The tested m/n substitutions were
+removed; `manual` and an ampersand were still misread. OCR execution was
+0.24 s raw versus 0.45 s enlarged on this sparse fixture, excluding image
+conversion and capture. This is a small local sample, not an accuracy guarantee.
+
+Version 0.2.3 uses ImageMagick to enlarge OCR input 2× and invalidates old OCR
+cache entries. Direct text extraction is unchanged. Screenshots remain local
+and are deleted after processing, including failures. No guessed URL character
+substitution or network destination probing is performed. ImageMagick is now a
+runtime dependency. Reproduce with `python3 benchmarks/foot_ocr_accuracy.py`.
+
+Tesseract's [quality guidance](https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html)
+recommends rescaling small input. Other filters and the upstream best English
+model did not eliminate all errors in this fixture; they were not adopted.
+The older latency measurements above describe the pre-scaling implementation.
