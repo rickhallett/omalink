@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"ms02.omalink","name":"omalink","version":"0.1.0","author":"rickhallett","description":"Keyboard picker for URLs visible on the focused monitor","kinds":["panel"],"keepLoaded":true,"entryPoints":{"panel":"Panel.qml"}}
