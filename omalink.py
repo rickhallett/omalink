@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Pick visible screen URLs with local OCR and open them in Chrome."""
+"""Pick visible URLs using direct text or local OCR and open them in Chrome."""
 import argparse
 import fcntl
 import json
@@ -95,6 +95,9 @@ def runtime():
         try:
             if time.time()-p.stat().st_mtime>300: p.unlink(missing_ok=True)
         except FileNotFoundError: pass
+    for p in RUNTIME.iterdir():
+        if re.fullmatch(r'[0-9a-f]{32}',p.name) and p.is_dir() and time.time()-p.stat().st_mtime>300:
+            shutil.rmtree(p,ignore_errors=True)
 
 def owned(path):
     p=Path(path)
@@ -102,40 +105,131 @@ def owned(path):
         raise ValueError('Not an omalink capture')
     return p
 
-def capture():
+def config():
+    path=Path(os.environ.get('XDG_CONFIG_HOME',str(Path.home()/'.config')))/'omalink/config.json'
+    settings={'scope':'window','threads':1,'cache_ttl_s':30,'direct':True}
+    if path.exists(): settings.update(json.loads(path.read_text()))
+    if settings['scope'] not in {'window','monitor'}: raise ValueError('scope must be window or monitor')
+    if settings['threads'] not in {1,2,4}: raise ValueError('threads must be 1, 2 or 4')
+    return settings
+
+
+def collect(text,links=()):
+    urls=extract(text)
+    # OSC-8 hyperlinks preserve destinations even when terminal labels hide them.
+    for value in re.findall(r'\x1b\]8;[^;]*;([^\x07\x1b]+)',text)+list(links):
+        try: value=validate(value)
+        except (ValueError,OSError): continue
+        if value not in urls: urls.append(value)
+    return {'urls':urls,'image_marker':bool(re.search(r'\bImage\s*#\s*\d+',text,re.I))}
+
+
+def decorate(data,source,elapsed_ms):
+    urls=list(data['urls']); recent=recent_images() if data.get('image_marker') else []
+    for value in recent:
+        if value not in urls: urls.append(value)
+    note=f'{source} · {round(elapsed_ms)} ms'
+    if recent: note+=' · Image labels: local images are recent candidates, not resolved destinations.'
+    return {'urls':urls,'note':note,'source':source,'elapsed_ms':round(elapsed_ms,2)}
+
+
+def metric(record):
+    # No screenshot, title, path, OCR text or URL content in performance records.
     runtime()
+    path=RUNTIME/'timings.jsonl'
+    if path.exists() and path.stat().st_size>256000: path.unlink()
+    with path.open('a') as stream: stream.write(json.dumps(record)+'\n')
+    path.chmod(0o600)
+
+
+def geometry(window,monitor):
+    scale=monitor.get('scale',1)
+    # Hyprland window coordinates and grim -g both use logical layout units.
+    mw,mh=monitor['width']/scale,monitor['height']/scale
+    if monitor.get('transform',0) in {1,3,5,7}: mw,mh=mh,mw
+    mx,my=monitor['x'],monitor['y']; x,y=window['at']; w,h=window['size']
+    left=max(mx,x); top=max(my,y); right=min(mx+mw,x+w); bottom=min(my+mh,y+h)
+    if right<=left or bottom<=top: raise ValueError('Focused window does not intersect its monitor')
+    return f'{round(left)},{round(top)} {round(right-left)}x{round(bottom-top)}'
+
+
+def capture(scope=None):
+    import uuid
+    import providers
+    settings=config(); scope=scope or settings['scope']
+    runtime(); start=time.perf_counter()
     with (RUNTIME/'capture.lock').open('w') as lock:
         try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError: return
         monitors=json.loads(run(['hyprctl','monitors','-j']).stdout)
         monitor=next((m for m in monitors if m.get('focused')),None)
         if not monitor: raise ValueError('No focused monitor')
-        # Hide a previous picker before taking the new frame.
-        run(['omarchy-shell','shell','hide',PLUGIN]); time.sleep(0.16)
+        window=json.loads(run(['hyprctl','activewindow','-j']).stdout)
+        if not window.get('mapped') or not window.get('size'): scope='monitor'
+        run(['omarchy-shell','shell','hide',PLUGIN])
+        provider=providers.eligible(window) if scope=='window' and settings['direct'] else None
+        if provider:
+            data=providers.direct(window,provider,uuid.uuid4().hex)
+            if data:
+                result=collect(data.get('text',''),data.get('links',[]))
+                if result['urls'] or result['image_marker']:
+                    result=decorate(result,provider+' text',(time.perf_counter()-start)*1000)
+                    metric({'source':result['source'],'total_ms':result['elapsed_ms'],'links':len(result['urls'])})
+                    run(['omarchy-shell','shell','summon',PLUGIN,json.dumps({**result,'monitor':monitor['name']})])
+                    return
+        # Allow the old picker to finish its 140 ms fade, if one was open.
+        time.sleep(max(0,0.16-(time.perf_counter()-start)))
         with tempfile.NamedTemporaryFile(prefix='capture-',suffix='.png',dir=RUNTIME,delete=False) as temp:
             path=Path(temp.name)
         try:
-            run(['grim','-o',monitor['name'],str(path)])
-            run(['omarchy-shell','shell','summon',PLUGIN,json.dumps({'image':str(path),'monitor':monitor['name']})])
+            command=['grim','-l','0']
+            if scope=='window': command+=['-g',geometry(window,monitor),'-s',str(monitor.get('scale',1))]
+            else: command+=['-o',monitor['name']]
+            run(command+[str(path)])
+            elapsed=(time.perf_counter()-start)*1000
+            payload={'image':str(path),'monitor':monitor['name'],'scope':scope,'captureMs':elapsed}
+            run(['omarchy-shell','shell','summon',PLUGIN,json.dumps(payload)])
         except Exception:
             path.unlink(missing_ok=True); raise
 
-def ocr(path):
-    path=owned(path)
+
+def ocr(path,scope='window',capture_ms=0):
+    import hashlib
+    path=owned(path); started=time.perf_counter(); settings=config()
+    cache=RUNTIME/'cache'; cache.mkdir(parents=True,exist_ok=True,mode=0o700)
+    ttl=max(0,min(300,float(settings['cache_ttl_s'])))
     try:
-        result=run(['tesseract',str(path),'stdout','--oem','1','--psm','11','-l','eng','--dpi','150'])
-        urls=extract(result.stdout)
-        candidates=bool(re.search(r'\bImage\s*#\s*\d+',result.stdout,re.I))
-        recent=recent_images() if candidates else []
-        for uri in recent:
-            if uri not in urls: urls.append(uri)
-        return {'urls':urls,'note':'Image labels found: local files below are recent generated-image candidates, not resolved label destinations.' if recent else ''}
+        entries=sorted(cache.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True)
+        for i,p in enumerate(entries):
+            if i>=16 or time.time()-p.stat().st_mtime>ttl: p.unlink(missing_ok=True)
+        digest=hashlib.sha256(path.read_bytes()+f'ocr-v3:{settings["threads"]}:eng:11'.encode()).hexdigest()
+        entry=cache/(digest+'.json'); data=None
+        if entry.exists() and ttl:
+            try:
+                candidate=json.loads(entry.read_text())
+                if isinstance(candidate,dict) and isinstance(candidate.get('urls'),list) and all(isinstance(u,str) for u in candidate['urls']): data=candidate
+            except (OSError,ValueError): pass
+        cached=data is not None
+        if data is None:
+            result=run(['tesseract',str(path),'stdout','--oem','1','--psm','11','-l','eng','--dpi','150'],env={**os.environ,'OMP_THREAD_LIMIT':str(settings['threads'])})
+            data=collect(result.stdout)
+            if ttl:
+                with tempfile.NamedTemporaryFile(mode='w',prefix='entry-',suffix='.tmp',dir=cache,delete=False) as stream:
+                    json.dump(data,stream); temporary=Path(stream.name)
+                temporary.replace(entry)
+        elapsed=(time.perf_counter()-started)*1000+capture_ms
+        result=decorate(data,('cached ' if cached else '')+scope+' OCR',elapsed)
+        metric({'source':result['source'],'total_ms':result['elapsed_ms'],'capture_ms':capture_ms,'links':len(result['urls'])})
+        return result
     finally: path.unlink(missing_ok=True)
+
 
 def chrome_command(url):
     url=validate(url)
     chrome=shutil.which('google-chrome-stable') or shutil.which('google-chrome')
     if not chrome: raise ValueError('Google Chrome is not installed')
+    bridge=Path.home()/'.local/share/omalink/bin/google-chrome-stable'
+    if bridge.is_file(): chrome=str(bridge)
     return ['systemd-run','--user','--quiet','--collect',f'--unit=omalink-chrome-{time.time_ns()}',
             '--property=StandardOutput=null','--property=StandardError=null','uwsm-app','--',chrome,'--new-tab',url]
 
@@ -153,14 +247,19 @@ def open_url(url):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='command')
-    sub.add_parser('capture'); sub.add_parser('demo')
+    p=sub.add_parser('capture'); p.add_argument('--monitor',action='store_true'); sub.add_parser('demo')
+    sub.add_parser('from-stdin')
     for name,arg in [('ocr','path'),('discard','path'),('open','url')]:
         p=sub.add_parser(name); p.add_argument(arg)
+        if name=='ocr': p.add_argument('--scope',choices=['window','monitor'],default='window'); p.add_argument('--capture-ms',type=float,default=0)
     p=sub.add_parser('extract'); p.add_argument('text')
     args=parser.parse_args()
     if not args.command: parser.print_help(); return
-    if args.command=='capture': capture()
-    elif args.command=='ocr': print(json.dumps(ocr(args.path)))
+    if args.command=='capture': capture('monitor' if args.monitor else None)
+    elif args.command=='ocr': print(json.dumps(ocr(args.path,args.scope,args.capture_ms)))
+    elif args.command=='from-stdin':
+        import sys,providers
+        providers.deliver({'text':sys.stdin.read(131072)},'foot')
     elif args.command=='discard': owned(args.path).unlink(missing_ok=True)
     elif args.command=='open': open_url(args.url)
     elif args.command=='extract': print(json.dumps(extract(args.text)))

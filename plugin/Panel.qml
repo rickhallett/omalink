@@ -12,40 +12,62 @@ Item {
     property var urls: []
     property string message: ""
     property string monitorName: ""
+    property int generation: 0
+    property var pending: null
+    readonly property bool scanning: pending !== null || (reader.running && reader.generation === generation)
     readonly property string executable: Quickshell.env("HOME") + "/.local/bin/omalink"
+    IpcHandler {
+        target: "omalink"
+        function status(): string {
+            return JSON.stringify({opened: root.opened, scanning: root.scanning, links: root.urls.length, note: root.message, generation: root.generation, selected: list.currentIndex})
+        }
+    }
     function open(payload) {
         var p = {}
         try { p = JSON.parse(payload || "{}") } catch(e) {}
         if (p.monitor) monitorName = p.monitor
+        generation++
+        discardPending()
         opened = true
-        if (reader.running) {
-            if (p.image) Quickshell.execDetached([executable, "discard", p.image])
-        } else {
-            urls = p.urls || []
-            message = ""
-            list.currentIndex = 0
-            if (p.image) {
-                reader.command = [executable, "ocr", p.image]
-                reader.running = true
-            }
+        urls = p.urls || []
+        message = p.note || ""
+        list.currentIndex = 0
+        if (p.image) {
+            pending = p
+            startPending()
         }
         Qt.callLater(function() { keys.forceActiveFocus() })
     }
-    function close() { opened = false }
+    function discardPending() {
+        if (pending) Quickshell.execDetached([executable, "discard", pending.image])
+        pending = null
+    }
+    function startPending() {
+        if (reader.running || !pending || !opened) return
+        var p = pending
+        pending = null
+        reader.generation = generation
+        reader.command = [executable, "ocr", p.image, "--scope", p.scope || "window", "--capture-ms", String(p.captureMs || 0)]
+        reader.running = true
+    }
+    function close() { opened = false; generation++; discardPending() }
     function choose() {
-        if (reader.running || opener.running || list.currentIndex < 0 || list.currentIndex >= urls.length) return
+        if (scanning || opener.running || list.currentIndex < 0 || list.currentIndex >= urls.length) return
         opener.command = [executable, "open", urls[list.currentIndex]]
         opener.running = true
     }
     Process {
         id: reader
+        property int generation: -1
         stdout: StdioCollector {
             onStreamFinished: {
+                if (!root.opened || reader.generation !== root.generation) return
                 try { var result = JSON.parse(text); root.urls = result.urls || []; root.message = result.note || ""; list.currentIndex = 0 }
                 catch(e) { root.message = "Could not read the OCR result" }
             }
         }
-        stderr: StdioCollector { onStreamFinished: if (text.trim()) root.message = text.trim() }
+        stderr: StdioCollector { onStreamFinished: if (root.opened && reader.generation === root.generation && text.trim()) root.message = text.trim() }
+        onExited: Qt.callLater(function() { root.startPending() })
     }
     Process {
         id: opener
@@ -79,7 +101,7 @@ Item {
                 spacing: Style.space(16)
                 PanelHero {
                     title: "omalink"
-                    detail: reader.running ? "Scanning" : root.urls.length + " links"
+                    detail: root.scanning ? "Scanning" : root.urls.length + " links"
                     iconComponent: Component { Text { text: "󰌷"; color: Color.foreground; font.family: Style.font.family; font.pixelSize: Style.font.display } }
                     trailingControl: Component { PanelActionButton { iconText: "󰅖"; tooltipText: "Close"; onClicked: root.close() } }
                 }
@@ -119,7 +141,7 @@ Item {
                     Text {
                         width: parent.width
                         anchors.centerIn: parent
-                        text: reader.running ? "Reading the screen locally…" : (root.urls.length ? "" : root.message || "No visible URLs found\nHidden link destinations and truncated URLs cannot be read from pixels.")
+                        text: root.scanning ? "Reading the screen locally…" : (root.urls.length ? "" : "No visible URLs found")
                         visible: text !== ""
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap
@@ -132,7 +154,7 @@ Item {
                     id: footer
                     width: parent.width
                     wrapMode: Text.Wrap
-                    text: root.message || "j / k  select   ·   Enter  open in Chrome   ·   Esc  close"
+                    text: (root.message ? root.message + "\n" : "") + "j / k  select   ·   Enter  open in Chrome   ·   Esc  close"
                     color: Color.foreground; opacity: 0.6
                     font.family: Style.font.family; font.pixelSize: Style.font.caption
                 }
