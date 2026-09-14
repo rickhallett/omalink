@@ -60,14 +60,18 @@ class GeometryTests(unittest.TestCase):
         with self.assertRaises(ValueError): omalink.geometry({'at':[5000,0],'size':[100,100]},{'width':1920,'height':1080,'x':0,'y':0})
 
 class CaptureTests(unittest.TestCase):
-    def test_old_foot_uses_text_hints_without_screen_capture(self):
-        window={'pid':123,'class':'foot','address':'0x123','mapped':True,'size':[800,600]}
+    def test_old_foot_uses_the_same_panel_with_ocr(self):
+        window={'pid':123,'class':'foot','address':'0x123','mapped':True,'at':[0,0],'size':[800,600]}
+        monitor={'name':'test','focused':True,'width':1920,'height':1080,'x':0,'y':0,'scale':1}
         def run(args,**kwargs):
-            return SimpleNamespace(stdout=json.dumps([{'name':'test','focused':True}] if args[:2]==['hyprctl','monitors'] else window))
-        with tempfile.TemporaryDirectory() as tmp,patch.object(omalink,'RUNTIME',Path(tmp)),patch.object(omalink,'run',side_effect=run) as mocked,patch.object(providers,'eligible',return_value=None),patch.object(providers,'foot_url_mode') as hints,patch.object(omalink,'config',return_value={'scope':'window','direct':True}):
+            return SimpleNamespace(stdout=json.dumps([monitor] if args[:2]==['hyprctl','monitors'] else window))
+        with tempfile.TemporaryDirectory() as tmp,patch.object(omalink,'RUNTIME',Path(tmp)),patch.object(omalink,'run',side_effect=run) as mocked,patch.object(providers,'eligible',return_value=None),patch.object(omalink,'config',return_value={'scope':'window','direct':True}):
             omalink.capture()
-            hints.assert_called_once_with(window)
-            self.assertFalse(any(c.args[0][0]=='grim' for c in mocked.call_args_list))
+            self.assertTrue(any(c.args[0][0]=='grim' for c in mocked.call_args_list))
+            payload=json.loads(mocked.call_args.args[0][-1])
+            self.assertEqual(mocked.call_args.args[0][:4],['omarchy-shell','shell','summon',omalink.PLUGIN])
+            self.assertEqual(payload['scope'],'window')
+            self.assertIn('image',payload)
 
     def test_window_and_monitor_grim_options_are_mutually_exclusive(self):
         monitor={'name':'test','focused':True,'width':1920,'height':1080,'x':0,'y':0,'scale':1}

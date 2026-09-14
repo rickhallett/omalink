@@ -87,14 +87,3 @@ def direct(window,provider,token,timeout=0.35):
         shutil.rmtree(directory,ignore_errors=True)
     return None
 
-
-def foot_url_mode(window):
-    """Use Foot's existing text-based hints in terminals predating the bridge."""
-    address=window['address']
-    if not re.fullmatch(r'0x[0-9a-fA-F]+',address):
-        raise ValueError('Invalid Foot window address')
-    def edge(state):
-        expression='hl.dsp.send_key_state({ mods = "CTRL SHIFT", key = "O", state = "'+state+'", window = "address:'+address+'" })'
-        subprocess.run(['hyprctl','dispatch',expression],capture_output=True,timeout=.2,check=True)
-    try: edge('down')
-    finally: edge('up')

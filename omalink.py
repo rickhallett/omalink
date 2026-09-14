@@ -172,12 +172,6 @@ def capture(scope=None):
         if not window.get('mapped') or not window.get('size'): scope='monitor'
         run(['omarchy-shell','shell','hide',PLUGIN])
         provider=providers.eligible(window) if scope=='window' and settings['direct'] else None
-        if scope=='window' and settings['direct'] and window.get('class','').lower()=='foot' and provider is None:
-            # Older Foot processes cannot reload pipe-visible. Their built-in
-            # URL mode uses original text, without guessing URLs from pixels.
-            providers.foot_url_mode(window)
-            metric({'source':'foot native hints','total_ms':round((time.perf_counter()-start)*1000,2)})
-            return
         if provider:
             data=providers.direct(window,provider,uuid.uuid4().hex)
             if data:
