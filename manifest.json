@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "ms02.omalink",
+  "name": "omalink",
+  "version": "0.2.0",
+  "author": "rickhallett",
+  "description": "Gather visible links into a native keyboard picker. Direct text from Foot and Chrome, with local OCR fallback.",
+  "kinds": [
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "plugin/Panel.qml"
+  }
+}

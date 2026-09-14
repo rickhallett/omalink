@@ -1,7 +1,13 @@
 #!/usr/bin/python3
 """Install optional direct text bridges while preserving existing settings."""
-import json,os,shutil,time
+import argparse,json,os,shutil,time
 from pathlib import Path
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--apply',action='store_true',help='Explicitly apply the described user configuration changes')
+args=parser.parse_args()
+if not args.apply:
+    print('Preview only. --apply will add a Foot visible-text key binding, create a Chrome accessibility launcher and local desktop override, and create default omalink settings if absent. Existing changed configurations receive timestamped backups. No applications are restarted. See README for removal.')
+    raise SystemExit(0)
 root=Path(__file__).resolve().parent
 home=Path.home(); config=Path(os.environ.get('XDG_CONFIG_HOME',home/'.config'))
 app=config/'omalink'; app.mkdir(parents=True,exist_ok=True)
@@ -13,7 +19,7 @@ def write_preserving(path,text):
 
 settings=app/'config.json'
 if not settings.exists(): settings.write_text(json.dumps({'scope':'window','threads':1,'cache_ttl_s':30,'direct':True},indent=2)+'\n')
-foot=config/'foot/foot.ini'; text=foot.read_text()
+foot=config/'foot/foot.ini'; text=foot.read_text() if foot.exists() else ''
 pipe='pipe-visible=['+str(home/'.local/bin/omalink')+' from-stdin] Mod1+Shift+u'
 if pipe not in text:
     if '[key-bindings]' not in text: text+='\n[key-bindings]\n'

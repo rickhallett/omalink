@@ -1,5 +1,7 @@
 # omalink
 
+![Omalink native link picker](preview.png)
+
 Pick visible links from the keyboard, including destinations hidden behind browser link labels.
 
 **Super+U** reads the focused window and opens a centred, theme-aware Omarchy panel. Select with **j/k** or **↓/↑**, **Enter** opens in Chrome, **Esc** closes. **Super+Shift+U** scans the whole focused monitor instead.
@@ -18,17 +20,50 @@ On this machine, the direct paths reached the summon stage in **71 ms for Foot**
 
 Chrome's most recently focused normal window is focused before opening a new tab. Chrome's single-instance handling reuses the running browser or starts one if absent. Existing profiles and sessions are preserved.
 
-## Current installation
+## Install
 
-The command `~/.local/bin/omalink` links to this checkout. The native QML plugin is installed at `~/.config/omarchy/plugins/ms02.omalink/`, with shortcuts in `~/.config/hypr/bindings.lua`. The panel uses Omarchy's standard theme tokens and responds to theme changes.
+Early release for Omarchy Quattro. OCR can corrupt small text and query strings; check destinations before opening. Direct text is preferred for supported sessions.
 
-`/usr/bin/python3 install_integrations.py` installs the text bridges while preserving existing settings:
+Dependencies: Python 3, `grim`, `tesseract`, `tesseract-data-eng`, Google Chrome, Hyprland, and Omarchy's Quickshell. Optional Chrome text extraction also requires `python-gobject` and `at-spi2-core`. Benchmarks additionally use ImageMagick. No Python package installation is required.
 
-- Foot gets an `Alt+Shift+U` visible-text pipe. It takes effect in **new Foot processes**.
-- A local `google-chrome.desktop` override routes ordinary Chrome launches through `~/.local/share/omalink/bin/google-chrome-stable`. That wrapper enables Chrome's native accessibility interface. It takes effect when the **next Chrome process starts**, not merely when an existing process opens a new window.
-- Existing Foot/Chrome processes retain the faster OCR fallback. Installation does not close either application.
+```sh
+omarchy plugin add https://github.com/rickhallett/omalink --enable
+mkdir -p ~/.local/bin
+ln -s ~/.config/omarchy/plugins/ms02.omalink/omalink.py ~/.local/bin/omalink
+```
 
-The Chrome bridge requires system Python's PyGObject and the AT-SPI typelib. They are available on this installation. Enabling Chrome's accessibility tree has some browser-side processing/memory cost; whole-browser overhead has not been benchmarked. No extension, remote debugging port, background screenshot polling, or additional omalink daemon is installed.
+The symlink command refuses to replace an existing command. If `omalink` already exists, inspect it before making changes. Launch `omalink capture` from your terminal, or add these bindings to your existing `~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + U", "Open a visible URL", os.getenv("HOME") .. "/.local/bin/omalink capture")
+o.bind("SUPER + SHIFT + U", "Open a visible URL (whole monitor)", os.getenv("HOME") .. "/.local/bin/omalink capture --monitor")
+```
+
+Check for conflicting shortcuts before adding them, then run `hyprctl reload` and `hyprctl configerrors`.
+
+The native panel uses Omarchy theme tokens. Adding/enabling the plugin does not install packages, create commands, or modify terminal, browser, or shortcut settings automatically.
+
+### Optional direct text bridges
+
+Inspect the proposed configuration changes, then explicitly apply them:
+
+```sh
+/usr/bin/python3 ~/.config/omarchy/plugins/ms02.omalink/install_integrations.py
+/usr/bin/python3 ~/.config/omarchy/plugins/ms02.omalink/install_integrations.py --apply
+```
+
+The installer adds a Foot visible-text shortcut and a Chrome accessibility launcher with a local desktop override. Existing changed configurations receive timestamped backups. New Foot processes and the next ordinary Chrome process load the bridges; existing processes keep the OCR fallback. It does not close either application.
+
+Enabling Chrome's accessibility tree has some browser-side processing/memory cost; whole-browser overhead has not been benchmarked. No browser extension, remote debugging port, background screenshot polling, or additional omalink daemon is installed.
+
+### Remove
+
+1. Remove the two omalink shortcut lines you added, then reload Hyprland.
+2. Remove the `omalink` command symlink if it points to this plugin.
+3. If you enabled direct text, remove the labelled omalink `pipe-visible` line from `~/.config/foot/foot.ini`. In the local `google-chrome.desktop` override, change only Exec paths pointing at the omalink browser wrapper back to `/usr/bin/google-chrome-stable`; preserve other customizations. The timestamped backups provide the original entries. Then remove `~/.local/share/omalink/bin/google-chrome-stable`.
+4. Run `omarchy plugin remove ms02.omalink`. Optionally remove `~/.config/omalink` and the temporary `$XDG_RUNTIME_DIR/omalink` data after checking their contents.
+
+No background omalink service needs disabling. The optional website preview is separate from the plugin.
 
 ## Configuration and commands
 
@@ -59,11 +94,11 @@ Screenshots live temporarily under `$XDG_RUNTIME_DIR/omalink` and are deleted af
 
 `timings.jsonl` in the same runtime directory contains only source, duration, capture duration and link count. It is size-bounded and contains no URLs, paths, titles or extracted text. Nothing is uploaded; the clipboard remains unchanged.
 
-## Verification and rollback
+## Verification
 
 ```sh
 /usr/bin/python3 -m unittest discover -v
-omarchy plugin validate plugin
+omarchy plugin validate .
 /usr/bin/python3 benchmarks/direct_smoke.py
 /usr/bin/python3 benchmarks/accessibility_smoke.py
 /usr/bin/python3 benchmarks/cache_smoke.py
@@ -72,6 +107,14 @@ omarchy plugin validate plugin
 
 The desktop smoke tests briefly open disposable test windows/panels and close only those they create. The OCR matrix additionally samples the visible screen; screenshots and text stay in temporary runtime storage, with only timings/counts/result hashes retained. See [results and limitations](benchmarks/RESULTS.md).
 
-For a quick OCR-only mode, set `direct` to `false`. To remove the browser-side accessibility cost on future launches, restore/remove this installation's local `google-chrome.desktop` override and remove the omalink browser wrapper. Remove the labelled `pipe-visible` line from Foot's config to remove its bridge. Existing configuration edits have timestamped `.bak-omalink-*` backups; restore only the relevant lines when later customizations exist. Returning to full-monitor/default-thread behaviour is possible from the baseline Git checkpoint `697623c`, but that checkout alone does not undo external configuration edits.
+For a quick OCR-only mode, set `direct` to `false`. This stops omalink using the bridges but does not disable Chrome's accessibility tree; see removal above.
+
+## Website preview
+
+```sh
+/usr/bin/python3 -m http.server 4173 --bind 127.0.0.1 --directory website
+```
+
+Open http://127.0.0.1:4173. The website's interactive picker is a simulation and does not capture the desktop.
 
 `plugin/LinkPopup.qml` derives from Omarchy's `Ui/KeyboardPanel.qml`, with central placement. Upstream MIT terms are retained in LICENSE.
