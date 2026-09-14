@@ -114,8 +114,12 @@ def config():
     return settings
 
 
-def collect(text,links=()):
+def collect(text,links=(),*,ocr=False):
     urls=extract(text)
+    if ocr:
+        # Single-label hosts are usually clipped OCR fragments (e.g. https://qithub).
+        # Direct text and explicit open commands still support intranet hosts.
+        urls=[u for u in urls if urlsplit(u).scheme=='file' or '.' in (urlsplit(u).hostname or '') or ':' in (urlsplit(u).hostname or '') or urlsplit(u).hostname=='localhost']
     # OSC-8 hyperlinks preserve destinations even when terminal labels hide them.
     for value in re.findall(r'\x1b\]8;[^;]*;([^\x07\x1b]+)',text)+list(links):
         try: value=validate(value)
@@ -168,6 +172,12 @@ def capture(scope=None):
         if not window.get('mapped') or not window.get('size'): scope='monitor'
         run(['omarchy-shell','shell','hide',PLUGIN])
         provider=providers.eligible(window) if scope=='window' and settings['direct'] else None
+        if scope=='window' and settings['direct'] and window.get('class','').lower()=='foot' and provider is None:
+            # Older Foot processes cannot reload pipe-visible. Their built-in
+            # URL mode uses original text, without guessing URLs from pixels.
+            providers.foot_url_mode(window)
+            metric({'source':'foot native hints','total_ms':round((time.perf_counter()-start)*1000,2)})
+            return
         if provider:
             data=providers.direct(window,provider,uuid.uuid4().hex)
             if data:
@@ -202,7 +212,7 @@ def ocr(path,scope='window',capture_ms=0):
         entries=sorted(cache.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True)
         for i,p in enumerate(entries):
             if i>=16 or time.time()-p.stat().st_mtime>ttl: p.unlink(missing_ok=True)
-        digest=hashlib.sha256(path.read_bytes()+f'ocr-v3:{settings["threads"]}:eng:11'.encode()).hexdigest()
+        digest=hashlib.sha256(path.read_bytes()+f'ocr-v4:{settings["threads"]}:eng:11'.encode()).hexdigest()
         entry=cache/(digest+'.json'); data=None
         if entry.exists() and ttl:
             try:
@@ -212,13 +222,14 @@ def ocr(path,scope='window',capture_ms=0):
         cached=data is not None
         if data is None:
             result=run(['tesseract',str(path),'stdout','--oem','1','--psm','11','-l','eng','--dpi','150'],env={**os.environ,'OMP_THREAD_LIMIT':str(settings['threads'])})
-            data=collect(result.stdout)
+            data=collect(result.stdout,ocr=True)
             if ttl:
                 with tempfile.NamedTemporaryFile(mode='w',prefix='entry-',suffix='.tmp',dir=cache,delete=False) as stream:
                     json.dump(data,stream); temporary=Path(stream.name)
                 temporary.replace(entry)
         elapsed=(time.perf_counter()-started)*1000+capture_ms
         result=decorate(data,('cached ' if cached else '')+scope+' OCR',elapsed)
+        result['note']+=' · Check destinations: OCR can misread links.'
         metric({'source':result['source'],'total_ms':result['elapsed_ms'],'capture_ms':capture_ms,'links':len(result['urls'])})
         return result
     finally: path.unlink(missing_ok=True)

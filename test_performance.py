@@ -43,6 +43,12 @@ class CacheTests(unittest.TestCase):
         self.assertNotIn('example.org',record)
         self.assertEqual((self.root/'timings.jsonl').stat().st_mode & 0o777,0o600)
 
+class OCRValidityTests(unittest.TestCase):
+    def test_clipped_host_is_not_offered_but_direct_intranet_is_preserved(self):
+        text='https://qithub https://github.com/rickhallett/omalink https://localhost:8000/'
+        self.assertEqual(omalink.collect(text,ocr=True)['urls'],['https://github.com/rickhallett/omalink','https://localhost:8000/'])
+        self.assertIn('https://qithub',omalink.collect(text)['urls'])
+
 class GeometryTests(unittest.TestCase):
     def test_scaled_and_clipped(self):
         m={'width':3840,'height':2160,'scale':2,'x':-1920,'y':0}
@@ -54,6 +60,15 @@ class GeometryTests(unittest.TestCase):
         with self.assertRaises(ValueError): omalink.geometry({'at':[5000,0],'size':[100,100]},{'width':1920,'height':1080,'x':0,'y':0})
 
 class CaptureTests(unittest.TestCase):
+    def test_old_foot_uses_text_hints_without_screen_capture(self):
+        window={'pid':123,'class':'foot','address':'0x123','mapped':True,'size':[800,600]}
+        def run(args,**kwargs):
+            return SimpleNamespace(stdout=json.dumps([{'name':'test','focused':True}] if args[:2]==['hyprctl','monitors'] else window))
+        with tempfile.TemporaryDirectory() as tmp,patch.object(omalink,'RUNTIME',Path(tmp)),patch.object(omalink,'run',side_effect=run) as mocked,patch.object(providers,'eligible',return_value=None),patch.object(providers,'foot_url_mode') as hints,patch.object(omalink,'config',return_value={'scope':'window','direct':True}):
+            omalink.capture()
+            hints.assert_called_once_with(window)
+            self.assertFalse(any(c.args[0][0]=='grim' for c in mocked.call_args_list))
+
     def test_window_and_monitor_grim_options_are_mutually_exclusive(self):
         monitor={'name':'test','focused':True,'width':1920,'height':1080,'x':0,'y':0,'scale':1}
         window={'pid':123,'class':'unknown','mapped':True,'at':[10,20],'size':[800,600]}
